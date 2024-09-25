@@ -12,8 +12,10 @@ use mini_lsm_wrapper::compact::{
 };
 use mini_lsm_wrapper::iterators::StorageIterator;
 use mini_lsm_wrapper::lsm_storage::{LsmStorageOptions, MiniLsm};
+use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
+use structured_logger::{json::new_writer, Builder};
 
 #[derive(Debug, Clone, ValueEnum)]
 enum CompactionStrategy {
@@ -345,6 +347,7 @@ fn main() -> Result<()> {
                 }
             },
             enable_wal: args.enable_wal,
+            max_manifest_file_size: 1 << 30,
             serializable: args.serializable,
         },
     )?;
@@ -354,6 +357,12 @@ fn main() -> Result<()> {
         .description("A CLI for mini-lsm")
         .prompt("mini-lsm-cli> ")
         .build(ReplHandler { epoch: 0, lsm })?;
+
+    let log_file = File::create("mini-lsm-release.log").unwrap();
+    Builder::with_level("info")
+        .with_target_writer("*", new_writer(log_file))
+        .init();
+    log::info!("mini-lsm started");
 
     repl.run()?;
     Ok(())

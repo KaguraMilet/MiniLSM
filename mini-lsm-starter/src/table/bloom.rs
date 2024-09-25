@@ -57,8 +57,11 @@ impl Bloom {
 
     /// Encode a bloom filter
     pub fn encode(&self, buf: &mut Vec<u8>) {
+        let bloom_start_pos = buf.len();
         buf.extend(&self.filter);
         buf.put_u8(self.k);
+        let checksum = crc32fast::hash(&buf[bloom_start_pos..]);
+        buf.put_u32(checksum);
     }
 
     /// Get bloom filter bits per key from entries count and FPR
@@ -72,14 +75,22 @@ impl Bloom {
     /// Build bloom filter from key hashes
     pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Self {
         let k = (bits_per_key as f64 * 0.69) as u32;
-        let k = k.min(30).max(1);
+        let k = k.clamp(1, 30);
         let nbits = (keys.len() * bits_per_key).max(64);
         let nbytes = (nbits + 7) / 8;
         let nbits = nbytes * 8;
         let mut filter = BytesMut::with_capacity(nbytes);
         filter.resize(nbytes, 0);
 
-        // TODO: build the bloom filter
+        for hash in keys {
+            let mut hash = *hash;
+            let delta = (hash >> 17) | hash.rotate_left(15);
+            for _ in 0..k {
+                let idx = (hash as usize) % nbits;
+                filter.set_bit(idx, true);
+                hash = hash.wrapping_add(delta);
+            }
+        }
 
         Self {
             filter: filter.freeze(),
@@ -88,15 +99,21 @@ impl Bloom {
     }
 
     /// Check if a bloom filter may contain some data
-    pub fn may_contain(&self, h: u32) -> bool {
+    pub fn may_contain(&self, mut h: u32) -> bool {
         if self.k > 30 {
             // potential new encoding for short bloom filters
             true
         } else {
             let nbits = self.filter.bit_len();
-            let delta = (h >> 17) | (h << 15);
+            let delta = (h >> 17) | h.rotate_left(15);
 
-            // TODO: probe the bloom filter
+            for _ in 0..self.k {
+                let idx = (h as usize) % nbits;
+                if !self.filter.get_bit(idx) {
+                    return false;
+                }
+                h = h.wrapping_add(delta);
+            }
 
             true
         }

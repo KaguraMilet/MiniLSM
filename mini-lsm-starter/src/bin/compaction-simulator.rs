@@ -2,6 +2,7 @@ mod wrapper;
 use wrapper::mini_lsm_wrapper;
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, BytesMut};
@@ -14,6 +15,7 @@ use mini_lsm_wrapper::key::KeyBytes;
 use mini_lsm_wrapper::lsm_storage::LsmStorageState;
 use mini_lsm_wrapper::mem_table::MemTable;
 use mini_lsm_wrapper::table::SsTable;
+use structured_logger::{json::new_writer, Builder};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -228,6 +230,11 @@ fn generate_random_split(
 
 fn main() {
     let args = Args::parse();
+    let log_file = File::create("compaction-simulator.log").unwrap();
+    Builder::with_level("info")
+        .with_target_writer("*", new_writer(log_file))
+        .init();
+
     match args {
         Args::Simple {
             dump_real_id,

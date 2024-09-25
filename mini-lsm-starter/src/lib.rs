@@ -1,5 +1,6 @@
 pub mod block;
 pub mod compact;
+pub mod db;
 pub mod debug;
 pub mod iterators;
 pub mod key;
