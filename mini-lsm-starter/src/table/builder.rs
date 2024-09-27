@@ -133,10 +133,6 @@ impl SsTableBuilder {
     fn freeze_block(&mut self) {
         // Get the original block
         let block = std::mem::replace(&mut self.builder, BlockBuilder::new(self.block_size));
-        log::debug!(
-            "Froze block and current block size: {}",
-            block.current_size()
-        );
         let encoded_block = block.build().encode();
         let blk_meta = BlockMeta {
             offset: self.data.len(),

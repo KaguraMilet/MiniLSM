@@ -469,7 +469,7 @@ impl LsmStorageInner {
         I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
     {
         let watermark = self.mvcc().watermark();
-        let mut builder = SsTableBuilder::new(self.options.target_sst_size);
+        let mut builder = SsTableBuilder::new(self.options.block_size);
         let mut builders = Vec::new();
         let mut prev_key = KeyVec::new();
 
@@ -497,10 +497,8 @@ impl LsmStorageInner {
 
             builder.add(iter.key(), iter.value());
             if builder.estimated_size() >= self.options.target_sst_size && !same_as_prev {
-                let builder = std::mem::replace(
-                    &mut builder,
-                    SsTableBuilder::new(self.options.target_sst_size),
-                );
+                let builder =
+                    std::mem::replace(&mut builder, SsTableBuilder::new(self.options.block_size));
                 builders.push(builder);
             }
             iter.next()?;
