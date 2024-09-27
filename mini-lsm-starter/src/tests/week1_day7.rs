@@ -1,9 +1,9 @@
 use tempfile::tempdir;
 
 use crate::{
+    filter::bloom::Bloom,
     key::{KeySlice, TS_ENABLED},
     table::{FileObject, SsTable, SsTableBuilder},
-    filter::bloom::Bloom,
 };
 
 fn key_of(idx: usize) -> Vec<u8> {
