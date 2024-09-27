@@ -465,7 +465,7 @@ impl LsmStorageInner {
 
     pub fn get_with_ts(&self, key: &[u8], timestamp: TimeStamp) -> Result<Option<Bytes>> {
         let key = KeySlice::from_slice(key, timestamp);
-        let key_hash = farmhash::fingerprint32(key.key_ref());
+        let key_hash = xxhash_rust::xxh64::xxh64(key.key_ref(), 0);
         let snapshot = {
             let guard = self.state.read();
             guard.clone()
@@ -481,12 +481,12 @@ impl LsmStorageInner {
             }
         }
 
-        let filter_table = |key: &[u8], table: &SsTable, key_hash: u32| {
+        let filter_table = |key: &[u8], table: &SsTable, key_hash: u64| {
             if Self::is_key_exist(key, (table.first_key(), table.last_key()))
                 && table
                     .filter
                     .as_ref()
-                    .is_some_and(|filter| filter.may_contain(key_hash))
+                    .is_some_and(|filter| filter.might_contain(key_hash))
             {
                 return true;
             }
