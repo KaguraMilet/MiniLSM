@@ -1,4 +1,3 @@
-pub(crate) mod bloom;
 mod builder;
 mod iterator;
 
@@ -12,10 +11,9 @@ use bytes::{Buf, BufMut};
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
+use crate::filter::block_bloom::SBBloom;
 use crate::key::{KeyBytes, KeySlice, TimeStamp};
 use crate::lsm_storage::BlockCache;
-
-use self::bloom::Bloom;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
@@ -139,7 +137,7 @@ pub struct SsTable {
     // Fence pointer of SSTable
     first_key: KeyBytes,
     last_key: KeyBytes,
-    pub(crate) filter: Option<Bloom>,
+    pub(crate) filter: Option<SBBloom>,
     /// The maximum timestamp stored in this SST, implemented in week 3.
     max_ts: TimeStamp,
 }
@@ -170,7 +168,8 @@ impl SsTable {
                 == checksum,
             "SSTable {id} filter corrupted, checksum mismatch"
         );
-        let filter = Bloom::decode(&filter_with_checksum[..filter_with_checksum.len() - SIZE_U32])?;
+        let filter =
+            SBBloom::decode(&filter_with_checksum[..filter_with_checksum.len() - SIZE_U32])?;
         // Get the block metadata
         let block_meta_start_pos = filter_start_pos - (SIZE_U32 as u64);
         // Get the metadata section start position

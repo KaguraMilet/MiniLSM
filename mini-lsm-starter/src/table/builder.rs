@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bytes::BufMut;
-use farmhash::fingerprint32;
+use xxhash_rust::xxh64::xxh64;
 
-use super::bloom::Bloom;
 use super::{BlockMeta, FileObject, SsTable};
 use crate::key::{Key, KeyVec, TimeStamp};
 use crate::{
     block::BlockBuilder,
+    filter::block_bloom::{number_of_bits, SBBloom},
     key::{KeyBytes, KeySlice},
     lsm_storage::BlockCache,
 };
@@ -19,11 +19,11 @@ pub struct SsTableBuilder {
     builder: BlockBuilder,
     first_key: KeyVec, // First key of every block
     last_key: KeyVec,  // Last key of every block
-    last_hash: u32,
+    last_hash: u64,
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>, // Each block contains meta info
     block_size: usize,
-    hashs: Vec<u32>,
+    hashes: Vec<u64>,
     max_ts: TimeStamp,
 }
 
@@ -38,7 +38,7 @@ impl SsTableBuilder {
             data: Vec::new(),
             meta: Vec::new(),
             block_size,
-            hashs: Vec::new(),
+            hashes: Vec::new(),
             max_ts: TimeStamp::default(),
         }
     }
@@ -53,11 +53,11 @@ impl SsTableBuilder {
         }
         // Hash sharing
         if self.last_key.as_key_slice().key_ref() != key.key_ref() {
-            let hash = fingerprint32(key.key_ref());
-            self.hashs.push(hash);
+            let hash = xxh64(key.key_ref(), 0);
+            self.hashes.push(hash);
             self.last_hash = hash;
         } else {
-            self.hashs.push(self.last_hash);
+            self.hashes.push(self.last_hash);
         }
         if self.builder.add(key, value) {
             self.last_key.set_from_slice(key);
@@ -94,10 +94,7 @@ impl SsTableBuilder {
         BlockMeta::encode_block_meta_with_ts(&self.meta, &mut buf, self.max_ts);
         // Metadata offset represents the start position of blocks metadata
         buf.put_u32(metadata_offset as u32);
-        let filter = Bloom::build_from_key_hashes(
-            &self.hashs,
-            Bloom::bloom_bits_per_key(self.hashs.len(), 0.01),
-        );
+        let filter = SBBloom::build_filter(&self.hashes, number_of_bits(self.hashes.len(), 0.01));
         let filter_offset = buf.len();
         filter.encode(&mut buf);
         buf.put_u32(filter_offset as u32);

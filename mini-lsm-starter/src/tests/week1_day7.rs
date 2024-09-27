@@ -2,7 +2,8 @@ use tempfile::tempdir;
 
 use crate::{
     key::{KeySlice, TS_ENABLED},
-    table::{bloom::Bloom, FileObject, SsTable, SsTableBuilder},
+    table::{FileObject, SsTable, SsTableBuilder},
+    filter::bloom::Bloom,
 };
 
 fn key_of(idx: usize) -> Vec<u8> {
@@ -60,8 +61,9 @@ fn test_task2_sst_decode() {
     let sst2 = SsTable::open(0, None, FileObject::open(&path).unwrap()).unwrap();
     let bloom_1 = sst.filter.as_ref().unwrap();
     let bloom_2 = sst2.filter.as_ref().unwrap();
-    assert_eq!(bloom_1.k, bloom_2.k);
-    assert_eq!(bloom_1.filter, bloom_2.filter);
+    bloom_1.0.iter().zip(bloom_2.0.iter()).for_each(|(a, b)| {
+        assert_eq!(a.0, b.0);
+    })
 }
 
 #[test]
