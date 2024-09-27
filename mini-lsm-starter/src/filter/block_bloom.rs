@@ -1,16 +1,16 @@
 //! Bloom filter implementation inspired by Parquet, as described
 //! in the [spec][parquet-bf-spec]
-//! 
+//!
 //! # Bloom filter Size
 //! Parquet uses the [Split Block Bloom Filter][sbbf-paper] (SBBF) as its bloom filter
-//! implementation. The size of each filter is initialized using a calculation based on 
-//! the membership of n elements and false positive rate (FPR). The FPR for a SBBF can be 
+//! implementation. The size of each filter is initialized using a calculation based on
+//! the membership of n elements and false positive rate (FPR). The FPR for a SBBF can be
 //! approximated as<sup>[1][bf-formulae]</sup>:
 //!
 //! ```text
 //! f = (1 - exp(-k * n / m))^k
 //! ```
-//! 
+//!
 //! Where, `f` is the FPR, `k` the number of hash functions, `n` the number of elements, and `m` the total number
 //! of bits in the bloom filter. This can be re-arranged to determine the total number of bits
 //! required to achieve a given FPR and `n`:
@@ -22,17 +22,16 @@
 //! SBBFs use eight hash functions to cleanly fit in SIMD lanes<sup>[2][sbbf-paper]</sup>, therefore
 //! `k` is set to 8. The SBBF will spread those `m` bits accross a set of `b` blocks that
 //! are each 256 bits, i.e., 32 bytes, in size. The number of blocks is chosen as:
-//! 
+//!
 //! ```text
 //! blocks_num = next_power_of_two(m / 8) /32
 //! ```
-//! 
+//!
 //! SBBF trades off for false positive rate(FPR) to achieve higher probe speed
-//! 
+//!
 //! [parquet-bf-spec]: https://parquet.apache.org/docs/file-format/bloomfilter/
 //! [sbbf-paper]: https://arxiv.org/pdf/2101.01719
 //! [bf-formulae]: http://tfk.mit.edu/pdf/bloom.pdf
-
 
 use std::ops::{Index, IndexMut};
 
@@ -63,14 +62,14 @@ impl Block {
     fn mask(x: u32) -> Block {
         let mut result = [0_u32; 8];
         // Following three loops are written separately to be optimized for vectorization.
-        // Inspired from Java Parquet implementation: 
+        // Inspired from Java Parquet implementation:
         // https://github.com/apache/parquet-java/blob/master/parquet-column/src/main/java/org/apache/parquet/column/values/bloomfilter/BlockSplitBloomFilter.java#L225
         for i in 0..8 {
             result[i] = x.wrapping_mul(SALT[i]);
         }
         for i in 0..8 {
             // Value of `val` is in range [0, 31]
-            result[i] = result[i] >> 27;
+            result[i] >>= 27
         }
         for i in 0..8 {
             result[i] = 1 << result[i];

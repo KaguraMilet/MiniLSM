@@ -96,8 +96,4 @@ impl BlockBuilder {
             offsets: self.offsets,
         }
     }
-
-    pub(crate) fn current_size(&self) -> usize {
-        self.offsets.len() * SIZE_U16 + self.data.len() + SIZE_U16
-    }
 }

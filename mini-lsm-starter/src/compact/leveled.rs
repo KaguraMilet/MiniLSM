@@ -255,7 +255,7 @@ impl LeveledCompactionController {
                         .first_key(),
                 )
         });
-        log::debug!(
+        log::info!(
             "New lower level: {} sstables: {:?}",
             lower_level.0,
             lower_level.1

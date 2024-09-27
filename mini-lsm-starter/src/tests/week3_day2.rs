@@ -10,7 +10,6 @@ use crate::{
 
 #[test]
 fn test_task3_compaction_integration() {
-    // FIXME(asukamilet): 经典12236问题，还是先别急着修吧
     let dir = tempdir().unwrap();
     let mut options = LsmStorageOptions::default_for_week2_test(CompactionOptions::NoCompaction);
     options.enable_wal = true;

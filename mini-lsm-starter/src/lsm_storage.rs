@@ -1,5 +1,3 @@
-#![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
-
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::ops::Bound;
@@ -303,7 +301,7 @@ impl LsmStorageInner {
         } else {
             ensure!(path.is_dir(), "path is not a directory: {:?}", path);
         }
-        log::debug!("Open database: '{:?}'", path);
+        log::info!("Open database: '{:?}'", path);
         let mut state = LsmStorageState::create(&options);
         let mut next_sst_id = 1;
         let mut initial_ts: Option<TimeStamp> = None;
@@ -335,7 +333,7 @@ impl LsmStorageInner {
                     generate_filename_static(path, FileType::WAL, state.memtable.id()),
                 )?);
             }
-            log::debug!("Create manifest: '{:?}'", manifest_filename);
+            log::info!("Create manifest: '{:?}'", manifest_filename);
             manifest = Manifest::create(manifest_filename)?;
             // Record memtable create operation in `LsmStorageState::create(args)`
             manifest.add_record_when_init(ManifestRecord::NewMemtable(state.memtable.id()))?;
@@ -631,11 +629,6 @@ impl LsmStorageInner {
 
     /// Force freeze the current memtable to an immutable memtable
     pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
-        let old_memtable = {
-            let snapshot = self.state.read();
-            snapshot.memtable.clone()
-        };
-
         let new_memtable_id = self.next_sst_id();
         let new_memtable = if self.options.enable_wal {
             let wal_path = self.generate_filename(FileType::WAL, new_memtable_id);
@@ -644,10 +637,12 @@ impl LsmStorageInner {
             Arc::new(MemTable::create(new_memtable_id))
         };
 
-        let mut state_write = self.state.write();
-        let state = Arc::make_mut(&mut state_write);
-        state.imm_memtables.insert(0, old_memtable);
-        state.memtable = new_memtable;
+        {
+            let mut state_write = self.state.write();
+            let state = Arc::make_mut(&mut state_write);
+            let old_memtable = std::mem::replace(&mut state.memtable, new_memtable);
+            state.imm_memtables.insert(0, old_memtable);
+        }
 
         let _ = self
             .manifest
@@ -844,20 +839,6 @@ impl LsmStorageInner {
             map_bound(upper),
             timestamp,
         )?))
-    }
-
-    fn try_freeze(&self, estimated_size: usize) -> Result<()> {
-        // If the estimated size of the memtable is larger than the target size, freeze the memtable
-        if estimated_size >= self.options.target_sst_size {
-            let state_lock = self.state_lock.lock();
-            let guard = self.state.read();
-            // Avoid multi threads call freeze memtable multi times
-            if guard.memtable.approximate_size() >= self.options.target_sst_size {
-                drop(guard);
-                self.force_freeze_memtable(&state_lock)?;
-            }
-        }
-        Ok(())
     }
 
     fn is_key_exist(search_key: &[u8], fence_pointer: (&KeyBytes, &KeyBytes)) -> bool {
