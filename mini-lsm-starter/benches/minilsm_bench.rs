@@ -1,5 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use mini_lsm_starter::lsm_storage::{LsmStorageOptions, MiniLsm};
+use mini_lsm_starter::{
+    compact::{CompactionOptions, LeveledCompactionOptions},
+    lsm_storage::{LsmStorageOptions, MiniLsm},
+};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
 #[inline(always)]
@@ -63,7 +66,7 @@ fn put_bench(c: &mut Criterion) {
 
 fn get_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("Get bench");
-    for i in &vec![8, 12, 16, 20] {
+    for i in &[8, 12, 16, 20] {
         group.bench_with_input(format!("Get {}", i), i, |b, i| {
             let dir = tempfile::tempdir().unwrap();
             let storage = MiniLsm::open(&dir, LsmStorageOptions::default_for_week1_test()).unwrap();

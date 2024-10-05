@@ -69,7 +69,7 @@ impl BlockBuilder {
         self.offsets.push(self.data.len() as u16);
         // Encode the key
         self.data.put_u16(overlap_len as u16);
-        self.data.put_u16((key.key_len() - overlap_len) as u16);
+        self.data.put_u16(rest_key.len() as u16);
         self.data.put(rest_key);
         // Encode the timestamp
         self.data.put_u64(key.ts());

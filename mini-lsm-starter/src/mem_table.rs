@@ -130,6 +130,10 @@ impl MemTable {
 
     pub fn put_batch(&self, batch: &[(KeySlice, &[u8])]) -> Result<()> {
         let mut estimated_size = 0;
+        if let Some(ref wal) = self.wal {
+            wal.put_batch(batch)?;
+            wal.sync()?;
+        }
         batch.iter().for_each(|(key, value)| {
             estimated_size += key.raw_len() + value.len();
             self.map.insert(
@@ -137,9 +141,6 @@ impl MemTable {
                 Bytes::copy_from_slice(value),
             );
         });
-        if let Some(ref wal) = self.wal {
-            wal.put_batch(batch)?;
-        }
         self.approximate_size
             .fetch_add(estimated_size, std::sync::atomic::Ordering::Relaxed);
         Ok(())

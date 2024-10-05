@@ -1,4 +1,5 @@
 pub mod block;
+pub mod common;
 pub mod compact;
 pub mod db;
 pub mod debug;
