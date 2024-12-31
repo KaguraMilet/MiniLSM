@@ -85,12 +85,13 @@ impl LeveledCompactionController {
         }
     }
 
+    // Collect sstable id and size which exist key overlaps with upper level sstables
     fn find_overlapping_ssts(
         &self,
         snapshot: &LsmStorageState,
         upper_sst_ids: &[usize],
         in_level_idx: usize,
-    ) -> Vec<usize> {
+    ) -> Vec<(usize, u64)> {
         let min_key = upper_sst_ids
             .iter()
             .map(|id| {
@@ -127,9 +128,10 @@ impl LeveledCompactionController {
                     .ok_or_else(|| anyhow::anyhow!("sstable {id} not found"))
                     .unwrap();
                 // SSTable exist key overlaps with upper level sstables
-                (!(sst.last_key() < &min_key || sst.first_key() > &max_key)).then_some(*id)
+                (!(sst.last_key() < &min_key || sst.first_key() > &max_key))
+                    .then_some((*id, sst.table_size()))
             })
-            .collect::<Vec<usize>>()
+            .collect::<Vec<_>>()
     }
 
     pub fn generate_compaction_task(
@@ -155,15 +157,15 @@ impl LeveledCompactionController {
         // L0 compaction always have highest priority
         if snapshot.l0_sstables.len() >= self.options.level0_file_num_compaction_trigger {
             log::info!("Trigger compaction from L0 to L{}", base_level_idx + 1);
+            let (lower_level_sst_ids, _): (Vec<_>, Vec<_>) = self
+                .find_overlapping_ssts(snapshot, &snapshot.l0_sstables, base_level_idx)
+                .into_iter()
+                .unzip();
             return Some(LeveledCompactionTask {
                 upper_level: None,
                 upper_level_sst_ids: snapshot.l0_sstables.clone(),
                 lower_level: base_level_idx + 1,
-                lower_level_sst_ids: self.find_overlapping_ssts(
-                    snapshot,
-                    &snapshot.l0_sstables,
-                    base_level_idx,
-                ),
+                lower_level_sst_ids,
                 is_lower_level_bottom_level: base_level_idx + 1 == self.options.max_levels,
             });
         }
@@ -181,30 +183,116 @@ impl LeveledCompactionController {
             })
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
             .map(|(upper_idx, _)| {
-                let upper_level_sst_id = snapshot.levels[upper_idx]
-                    .1
-                    .iter()
-                    .min()
-                    .copied()
-                    .ok_or_else(|| anyhow::anyhow!("no sstables in upper level"))
-                    .unwrap();
+                (
+                    upper_idx,
+                    self.pick_sst_to_compact(snapshot, &snapshot.levels[upper_idx].1, upper_idx),
+                )
+            })
+            .filter(|(_, ids)| ids.is_some())
+            .map(|(upper_idx, ids)| {
+                let (upper_sst_id, lower_level_sst_ids) = ids.unwrap();
                 log::info!(
-                "Trigger compaction from L{} to L{}, select {upper_level_sst_id} for compaction",
-                upper_idx + 1,
-                upper_idx + 1 + 1
-            );
+                    "Trigger compaction from L{} to L{}, upper sst id: {}, lower sst ids: {:?}",
+                    upper_idx + 1,
+                    upper_idx + 1 + 1,
+                    upper_sst_id,
+                    lower_level_sst_ids
+                );
+
                 LeveledCompactionTask {
                     upper_level: Some(upper_idx + 1),
-                    upper_level_sst_ids: vec![upper_level_sst_id],
+                    upper_level_sst_ids: vec![upper_sst_id],
                     lower_level: upper_idx + 1 + 1,
-                    lower_level_sst_ids: self.find_overlapping_ssts(
-                        snapshot,
-                        &[upper_level_sst_id],
-                        upper_idx + 1,
-                    ),
+                    lower_level_sst_ids,
                     is_lower_level_bottom_level: upper_idx + 1 + 1 == self.options.max_levels,
                 }
             })
+    }
+
+    // Currently we only implement Refine-MOR partial file picking policy
+    // Details: https://cs-people.bu.edu/mathan/publications/edbt25-wei.pdf
+    //
+    // We return the selected sstable id of the upper level and sstable ids which overlap with the selected sstable
+    // in the lower level
+    fn pick_sst_to_compact(
+        &self,
+        snapshot: &LsmStorageState,
+        sst_ids: &[usize],
+        current_level_idx: usize,
+    ) -> Option<(usize, Vec<usize>)> {
+        // We iterate over all SSTs in the current level and collect overlap sstables and overlap ratio
+        let mut overlaps = sst_ids
+            .iter()
+            .map(|id| {
+                // Find overlapping sstables in the next level
+                let overlap_ssts =
+                    self.find_overlapping_ssts(snapshot, &[*id], current_level_idx + 1);
+                let (overlap_sst_ids, overlap_sst_sizes): (Vec<_>, Vec<_>) =
+                    overlap_ssts.into_iter().unzip();
+                // RocksDB uses uint64 to represent overlap ratio, we keep the same choice
+                let overlap_ratio = overlap_sst_sizes.iter().sum::<u64>()
+                    / snapshot
+                        .sstables
+                        .get(id)
+                        .ok_or_else(|| anyhow::anyhow!("sstable {id} not found"))
+                        .unwrap()
+                        .table_size();
+                (*id, overlap_sst_ids, overlap_ratio)
+            })
+            .collect::<Vec<_>>();
+
+        // Find the sstable with the smallest overlapping ratio, only uses index in `overlaps` and `overlapping ratio`
+        // to bypass borrow checker and avoid cloning
+        let min_overlap = overlaps
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (_, _, ratio))| *ratio)
+            .map(|(idx, (_, _, ratio))| (idx, *ratio));
+
+        if let Some((idx, ratio)) = min_overlap {
+            if ratio == 0 {
+                // we keep the same strategy as MinOverlappingRatio if the min overlapping ratio is 0
+                return Some(overlaps.remove(idx)).map(|(id, overlap_ids, _)| (id, overlap_ids));
+            }
+
+            // the overlapping ratio threshold is 1.05 * the smallest overlapping ratio
+            let threshold = 1.05 * ratio as f64;
+            // find the sstables with overlapping ratio less than the threshold, we only collect their index in `overlaps`
+            let candidates = overlaps
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, _, ratio))| (*ratio as f64) < threshold)
+                .map(|(idx, (_, _, _))| idx)
+                .collect::<Vec<_>>();
+
+            // The overlapping ratio of other sstables is too different from the MOR sstable
+            if candidates.len() == 1 {
+                return Some(overlaps.remove(idx)).map(|(id, overlap_ids, _)| (id, overlap_ids));
+            }
+
+            // If the candidate sstables has no next sstable, directly select it
+            if candidates.last().expect("candidates should not be empty") + 1 == overlaps.len() {
+                // Because we no longer need `overlaps`, we can directly pop the last element
+                return overlaps
+                    .pop()
+                    .map(|(id, overlap_sst_ids, _)| (id, overlap_sst_ids));
+            }
+
+            // select the file whose next file has the largest overlapping ratio.
+            let mut min_combined_ratio = u64::MAX;
+            let mut select_idx = 0;
+            candidates.iter().for_each(|idx| {
+                let gap = (overlaps[*idx].2 as f64) * 0.05 - overlaps[*idx + 1].2 as f64;
+                if gap < min_combined_ratio as f64 {
+                    min_combined_ratio = gap as u64;
+                    select_idx = *idx;
+                }
+            });
+
+            Some(overlaps.remove(select_idx)).map(|(id, overlap_ids, _)| (id, overlap_ids))
+        } else {
+            None
+        }
     }
 
     pub fn apply_compaction_result(
