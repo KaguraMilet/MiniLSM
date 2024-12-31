@@ -9,7 +9,8 @@ RocksDB is too complex and too large. And, I hate C++!
 - [x] Hash Sharing: [Reducing Bloom Filter CPU Overhead in LSM-Trees on Modern Storage Devices](https://dl.acm.org/doi/10.1145/3465998.3466002)
 - [x] Split Block Bloom Filter which used by Apache Parquet: [Parquet Bloom Filter](https://parquet.apache.org/docs/file-format/bloomfilter/)
 - [x] Hybrid Latch: [Scalable and robust latches for database systems](https://dl.acm.org/doi/10.1145/3399666.3399908)
-- [ ] SHaMba: [LSM-Tree Under (Memory) Pressure](https://cs-people.bu.edu/mathan/publications/adms22-mun.pdf)
+- [x] RefinedMOR: [Benchmarking, Analyzing, and Optimizing Write Amplification
+of Partial Compaction in RocksDB](https://cs-people.bu.edu/mathan/publications/edbt25-wei.pdf) 
 - [ ] [Range Cache: An Efficient Cache Component for Accelerating Range Queries on LSM Based Key-Value Stores](https://www.computer.org/csdl/proceedings-article/icde/2024/171500a488/1YOtAxDn2IU)
 
 ...
