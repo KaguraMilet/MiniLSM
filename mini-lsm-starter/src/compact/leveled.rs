@@ -229,8 +229,9 @@ impl LeveledCompactionController {
                     self.find_overlapping_ssts(snapshot, &[*id], current_level_idx + 1);
                 let (overlap_sst_ids, overlap_sst_sizes): (Vec<_>, Vec<_>) =
                     overlap_ssts.into_iter().unzip();
-                // RocksDB uses uint64 to represent overlap ratio, we keep the same choice
-                let overlap_ratio = overlap_sst_sizes.iter().sum::<u64>()
+                // RocksDB uses uint64 to represent overlap ratio, we keep the same choice, details:
+                // https://github.com/facebook/rocksdb/blob/3570e4f5ffb29bc21b9afb388104a0a04f9af356/db/version_set.cc#L3981
+                let overlap_ratio = overlap_sst_sizes.iter().sum::<u64>() * 1024
                     / snapshot
                         .sstables
                         .get(id)
@@ -256,12 +257,12 @@ impl LeveledCompactionController {
             }
 
             // the overlapping ratio threshold is 1.05 * the smallest overlapping ratio
-            let threshold = 1.05 * ratio as f64;
+            let threshold = (1.05 * ratio as f64) as u64;
             // find the sstables with overlapping ratio less than the threshold, we only collect their index in `overlaps`
             let candidates = overlaps
                 .iter()
                 .enumerate()
-                .filter(|(_, (_, _, ratio))| (*ratio as f64) < threshold)
+                .filter(|(_, (_, _, ratio))| *ratio < threshold)
                 .map(|(idx, (_, _, _))| idx)
                 .collect::<Vec<_>>();
 
@@ -271,11 +272,10 @@ impl LeveledCompactionController {
             }
 
             // If the candidate sstables has no next sstable, directly select it
-            if candidates.last().expect("candidates should not be empty") + 1 == overlaps.len() {
-                // Because we no longer need `overlaps`, we can directly pop the last element
-                return overlaps
-                    .pop()
-                    .map(|(id, overlap_sst_ids, _)| (id, overlap_sst_ids));
+            if let Some(idx) = candidates.last() {
+                if idx + 1 == overlaps.len() {
+                    return overlaps.pop().map(|(id, overlap_ids, _)| (id, overlap_ids));
+                }
             }
 
             // select the file whose next file has the largest overlapping ratio.
